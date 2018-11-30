@@ -111,12 +111,13 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 
 	expectedReplicas := instance.Spec.Replicas
 	currentPodList, err := r.listAllPodsWithLabel(instance)
-	currentPodList = filterPods(currentPodList)
 
 	if err != nil {
 		reqLogger.Error(err, "Failed to list pods with label due to error")
 		return reconcile.Result{}, err
 	}
+
+	currentPodList = filterPods(currentPodList)
 
 	reqLogger.Info("Compare pod numbers", "current", len(currentPodList.Items), "expected", expectedReplicas)
 	diff := len(currentPodList.Items) - expectedReplicas
