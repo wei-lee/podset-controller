@@ -182,7 +182,7 @@ func (r *ReconcilePodSet) listAllPodsWithLabel(cr *appv1alpha1.PodSet) (*corev1.
 func filterPods(podList *corev1.PodList) *corev1.PodList {
 	filteredPods := make([]corev1.Pod, 0)
 	for _, pod := range podList.Items {
-		if !isPodTerminating(pod) {
+		if isValidPod(pod) {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
@@ -191,8 +191,15 @@ func filterPods(podList *corev1.PodList) *corev1.PodList {
 	}
 }
 
-func isPodTerminating(pod corev1.Pod) bool {
-	return pod.GetDeletionTimestamp() != nil
+func isValidPod(pod corev1.Pod) bool {
+	if pod.GetDeletionTimestamp() != nil {
+		return false
+	}
+	phase := pod.Status.Phase
+	if phase != corev1.PodPending && phase != corev1.PodRunning {
+		return false
+	}
+	return true
 }
 
 func getNewStatus(pods []corev1.Pod) *appv1alpha1.PodSetStatus {
