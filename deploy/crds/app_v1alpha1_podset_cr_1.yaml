@@ -1,0 +1,7 @@
+apiVersion: app.example.com/v1alpha1
+kind: PodSet
+metadata:
+  name: example-podset-1
+spec:
+  # Add fields here
+  replicas: 2
