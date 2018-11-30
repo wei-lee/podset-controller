@@ -104,12 +104,14 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 
 	if !instance.GetDeletionTimestamp().IsZero() {
+		reqLogger.Info("PodSet cr is being deleted, ignore", "PodSet.Name", instance.Name)
 		//this PodSet is marked for deletion, we do nothing and we don't requeue the request. It will be GCed.
 		return reconcile.Result{}, nil
 	}
 
 	expectedReplicas := instance.Spec.Replicas
 	currentPodList, err := r.listAllPodsWithLabel(instance)
+	currentPodList = filterPods(currentPodList)
 
 	if err != nil {
 		reqLogger.Error(err, "Failed to list pods with label due to error")
@@ -142,6 +144,10 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 			reqLogger.Info("Deleting a Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 			err = r.client.Delete(context.TODO(), &pod)
 			if err != nil {
+				if errors.IsNotFound(err) {
+					reqLogger.Info("Pod is already deleted", "Pod.Name", pod.Name)
+					return reconcile.Result{}, nil
+				}
 				reqLogger.Error(err, "Failed to delete pod", "Pod.Name", pod.Name)
 				return reconcile.Result{}, err
 			}
@@ -149,7 +155,7 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 
 	status := getNewStatus(currentPodList.Items)
-	reqLogger.Info("New status", "status", status)
+	reqLogger.Info("New status", "status", status, "oldstatus", instance.Status)
 	_, err = r.updatePodSetStatus(instance, *status)
 	if err != nil {
 		reqLogger.Error(err, "Failed to update podset status")
@@ -162,13 +168,31 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 func (r *ReconcilePodSet) listAllPodsWithLabel(cr *appv1alpha1.PodSet) (*corev1.PodList, error) {
 	podList := &corev1.PodList{}
 
-	opts := &client.ListOptions{}
+	opts := &client.ListOptions{
+		Namespace: cr.Namespace,
+	}
 	opts.SetLabelSelector(fmt.Sprintf("%s=%s", POD_LABEL_NAME, cr.Name))
 	err := r.client.List(context.TODO(), opts, podList)
 	if err != nil {
 		return nil, err
 	}
 	return podList, nil
+}
+
+func filterPods(podList *corev1.PodList) *corev1.PodList {
+	filteredPods := make([]corev1.Pod, 0)
+	for _, pod := range podList.Items {
+		if !isPodTerminating(pod) {
+			filteredPods = append(filteredPods, pod)
+		}
+	}
+	return &corev1.PodList{
+		Items: filteredPods,
+	}
+}
+
+func isPodTerminating(pod corev1.Pod) bool {
+	return pod.GetDeletionTimestamp() != nil
 }
 
 func getNewStatus(pods []corev1.Pod) *appv1alpha1.PodSetStatus {
@@ -183,7 +207,8 @@ func getNewStatus(pods []corev1.Pod) *appv1alpha1.PodSetStatus {
 
 func (r *ReconcilePodSet) updatePodSetStatus(cr *appv1alpha1.PodSet, newStatus appv1alpha1.PodSetStatus) (*appv1alpha1.PodSet, error) {
 	oldStatus := cr.Status
-	if reflect.DeepEqual(oldStatus, newStatus) {
+	if reflect.DeepEqual(oldStatus, newStatus) ||
+		(len(oldStatus.PodNames) == 0 && len(newStatus.PodNames) == 0) {
 		//the status already matches, nothing to do
 		return cr, nil
 	}
